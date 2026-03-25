@@ -2,23 +2,116 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, RotateCcw, Trophy, AlertCircle, Timer, Box, Maximize, Minimize } from 'lucide-react';
+import { Play, RotateCcw, Trophy, AlertCircle, Timer, Box, Maximize, Minimize, Palette, Pause, Home } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 // --- Constants ---
-const TRAY_SIZE = 7;
-const ITEM_TYPES = [
-  { id: 'cube', color: '#ef4444', geometry: new THREE.BoxGeometry(2.25, 2.25, 2.25) },
-  { id: 'sphere', color: '#3b82f6', geometry: new THREE.SphereGeometry(1.5, 32, 32) },
-  { id: 'cylinder', color: '#10b981', geometry: new THREE.CylinderGeometry(1.2, 1.2, 2.25, 32) },
-  { id: 'torus', color: '#f59e0b', geometry: new THREE.TorusGeometry(1.05, 0.45, 16, 100) },
-  { id: 'cone', color: '#8b5cf6', geometry: new THREE.ConeGeometry(1.5, 2.7, 32) },
-  { id: 'octahedron', color: '#ec4899', geometry: new THREE.OctahedronGeometry(1.8) },
-  { id: 'capsule', color: '#06b6d4', geometry: new THREE.CapsuleGeometry(1.05, 1.2, 4, 16) },
-  { id: 'knot', color: '#14b8a6', geometry: new THREE.TorusKnotGeometry(0.9, 0.3, 64, 8) },
-  { id: 'icosahedron', color: '#f97316', geometry: new THREE.IcosahedronGeometry(1.65) },
-  { id: 'dodecahedron', color: '#a855f7', geometry: new THREE.DodecahedronGeometry(1.65) },
-];
+const TRAY_SIZE = 8;
+
+// Helper for standard physics rotation (Cylinders often need -90deg X rotation)
+const ROT_X_NEG_90 = new CANNON.Quaternion();
+ROT_X_NEG_90.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+
+interface ThemeItem {
+  id: string;
+  name: string;
+  color: string;
+  texture?: string;
+  createGeometry: () => THREE.BufferGeometry;
+  createShape: () => CANNON.Shape;
+  rotationOffset?: CANNON.Quaternion;
+}
+
+const THEMES: Record<string, { name: string, items: ThemeItem[] }> = {
+  fruit: {
+    name: 'Fruit Market',
+    items: [
+      { 
+        id: 'watermelon', name: 'Square Watermelon', color: '#166534', 
+        texture: 'https://loremflickr.com/512/512/watermelon,pattern',
+        createGeometry: () => new THREE.BoxGeometry(2.2, 2.2, 2.2),
+        createShape: () => new CANNON.Box(new CANNON.Vec3(1.1, 1.1, 1.1))
+      },
+      { 
+        id: 'orange', name: 'Orange', color: '#ea580c', 
+        texture: 'https://loremflickr.com/512/512/orange,skin',
+        createGeometry: () => new THREE.SphereGeometry(1.5, 12, 12),
+        createShape: () => new CANNON.Sphere(1.5)
+      },
+      { 
+        id: 'pineapple_slice', name: 'Pineapple Slice', color: '#facc15', 
+        texture: 'https://loremflickr.com/512/512/pineapple,texture',
+        createGeometry: () => new THREE.CylinderGeometry(1.4, 1.4, 0.6, 12),
+        createShape: () => new CANNON.Cylinder(1.4, 1.4, 0.6, 16),
+        rotationOffset: ROT_X_NEG_90
+      },
+      { 
+        id: 'pineapple_ring', name: 'Pineapple Ring', color: '#fbbf24', 
+        texture: 'https://loremflickr.com/512/512/pineapple,ring',
+        createGeometry: () => new THREE.TorusGeometry(1.1, 0.4, 6, 32),
+        createShape: () => new CANNON.Sphere(1.4) // Simplified physics
+      },
+      { 
+        id: 'strawberry', name: 'Strawberry', color: '#dc2626', 
+        texture: 'https://loremflickr.com/512/512/strawberry,texture',
+        createGeometry: () => {
+          const points = [];
+          for (let i = 0; i < 10; i++) {
+            points.push(new THREE.Vector2(Math.sin(i * 0.3) * 1.5 + 0.1, (i - 5) * 0.5));
+          }
+          return new THREE.LatheGeometry(points, 12);
+        },
+        createShape: () => new CANNON.Cylinder(0.1, 1.5, 2.5, 16),
+        rotationOffset: ROT_X_NEG_90
+      },
+      { 
+        id: 'starfruit', name: 'Starfruit Slice', color: '#ca8a04', 
+        texture: 'https://loremflickr.com/512/512/starfruit,texture',
+        createGeometry: () => {
+          const shape = new THREE.Shape();
+          const outerRadius = 1.8;
+          const innerRadius = 0.8;
+          for (let i = 0; i < 10; i++) {
+            const radius = i % 2 === 0 ? outerRadius : innerRadius;
+            const angle = (i / 10) * Math.PI * 2;
+            if (i === 0) shape.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+            else shape.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+          }
+          return new THREE.ExtrudeGeometry(shape, { depth: 0.6, bevelEnabled: true, bevelThickness: 0.1 });
+        },
+        createShape: () => new CANNON.Cylinder(1.8, 1.8, 0.6, 16),
+        rotationOffset: ROT_X_NEG_90
+      },
+      { 
+        id: 'banana', name: 'Banana', color: '#facc15', 
+        texture: 'https://loremflickr.com/512/512/banana,skin',
+        createGeometry: () => {
+          const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(-1.5, 1.5, 0), new THREE.Vector3(0, -1.5, 0), new THREE.Vector3(1.5, 1.5, 0));
+          return new THREE.TubeGeometry(curve, 8, 0.6, 4, false);
+        },
+        createShape: () => new CANNON.Box(new CANNON.Vec3(1.5, 0.6, 0.6))
+      },
+      { id: 'grapes', name: 'Grape Cluster', color: '#7c3aed', texture: 'https://loremflickr.com/512/512/grapes,texture', createGeometry: () => new THREE.IcosahedronGeometry(1.6, 0), createShape: () => new CANNON.Sphere(1.6) },
+      { id: 'melon', name: 'Cantaloupe', color: '#84cc16', texture: 'https://loremflickr.com/512/512/melon,texture', createGeometry: () => new THREE.SphereGeometry(1.7, 12, 12), createShape: () => new CANNON.Sphere(1.7) },
+      { id: 'blueberry', name: 'Blueberry', color: '#2563eb', texture: 'https://loremflickr.com/512/512/blueberry,texture', createGeometry: () => new THREE.SphereGeometry(1.2, 6, 6), createShape: () => new CANNON.Sphere(1.2) },
+    ]
+  },
+  gems: {
+    name: 'Shiny Gems',
+    items: [
+      { id: 'ruby', name: 'Ruby Box', color: '#ef4444', createGeometry: () => new THREE.BoxGeometry(2, 2, 2), createShape: () => new CANNON.Box(new CANNON.Vec3(1,1,1)) },
+      { id: 'sapphire', name: 'Sapphire', color: '#3b82f6', createGeometry: () => new THREE.IcosahedronGeometry(1.5), createShape: () => new CANNON.Sphere(1.4) },
+      { id: 'emerald', name: 'Emerald', color: '#10b981', createGeometry: () => new THREE.OctahedronGeometry(1.6), createShape: () => new CANNON.Sphere(1.4) },
+      { id: 'amethyst', name: 'Amethyst', color: '#a855f7', createGeometry: () => new THREE.DodecahedronGeometry(1.5), createShape: () => new CANNON.Sphere(1.5) },
+      { id: 'gold', name: 'Gold Bar', color: '#eab308', createGeometry: () => new THREE.BoxGeometry(2.5, 1, 1), createShape: () => new CANNON.Box(new CANNON.Vec3(1.25, 0.5, 0.5)) },
+      { id: 'diamond', name: 'Diamond', color: '#06b6d4', createGeometry: () => new THREE.ConeGeometry(1.5, 2, 6), createShape: () => new CANNON.Cylinder(0.1, 1.5, 2, 6), rotationOffset: ROT_X_NEG_90 },
+      { id: 'onyx', name: 'Onyx', color: '#1f2937', createGeometry: () => new THREE.BoxGeometry(2.2, 2.2, 2.2), createShape: () => new CANNON.Box(new CANNON.Vec3(1.1, 1.1, 1.1)) },
+      { id: 'pearl', name: 'Pearl', color: '#f3f4f6', createGeometry: () => new THREE.SphereGeometry(1.5, 32, 32), createShape: () => new CANNON.Sphere(1.5) },
+      { id: 'garnet', name: 'Garnet', color: '#9f1239', createGeometry: () => new THREE.TetrahedronGeometry(1.8), createShape: () => new CANNON.Sphere(1.4) },
+      { id: 'topaz', name: 'Topaz', color: '#f97316', createGeometry: () => new THREE.CylinderGeometry(1.2, 1.2, 1, 6), createShape: () => new CANNON.Cylinder(1.2, 1.2, 1, 6), rotationOffset: ROT_X_NEG_90 },
+    ]
+  }
+};
 
 const LEVEL_CONFIGS = [
   { types: 8, triplesPerType: 8, time: 180 },
@@ -40,31 +133,50 @@ interface GameItem {
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [gameState, setGameState] = useState<'start' | 'playing' | 'won' | 'lost'>('start');
+  const [isPaused, setIsPaused] = useState(false);
+  const [currentThemeId, setCurrentThemeId] = useState<string>('fruit');
   const [level, setLevel] = useState(0);
   const [tray, setTray] = useState<GameItem[]>([]);
+  const trayRef = useRef<GameItem[]>([]);
+
+  // Sync tray state to ref for use in animate loop
+  useEffect(() => {
+    trayRef.current = tray;
+  }, [tray]);
+
+  const [loadedTextures, setLoadedTextures] = useState<Record<string, boolean>>({});
   const [timeLeft, setTimeLeft] = useState(0);
   const [score, setScore] = useState(0);
   const [isMatching, setIsMatching] = useState(false);
+  const [isLosing, setIsLosing] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPageVisible, setIsPageVisible] = useState(true);
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMouseX, setLastMouseX] = useState(0);
   const [particleBursts, setParticleBursts] = useState<{ id: number; x: number; y: number }[]>([]);
-
-  const trayRef = useRef<GameItem[]>([]);
   const uiTrayRef = useRef<HTMLDivElement>(null);
   const trayNDCRef = useRef<{ left: number; right: number; centerY: number }>({ left: -0.8, right: 0.8, centerY: -0.8 });
   const trayCapturedRef = useRef(false);
   const rotationRef = useRef(0);
   const clickedItemRef = useRef<GameItem | null>(null);
+  const isPausedRef = useRef(false);
+
+  // Get current theme object
+  const theme = THEMES[currentThemeId];
 
   // Sync rotationRef
   useEffect(() => {
     rotationRef.current = rotation;
   }, [rotation]);
+
+  // Sync isPausedRef
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
 
   // Handle page visibility
   useEffect(() => {
@@ -82,22 +194,39 @@ export default function App() {
 
   // Three.js Refs
   const sceneRef = useRef<THREE.Scene | null>(null);
+  const overlaySceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const overlayCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const worldRef = useRef<CANNON.World | null>(null);
   const itemMaterialRef = useRef<CANNON.Material | null>(null);
   const itemsRef = useRef<GameItem[]>([]);
+  const texturesRef = useRef<Record<string, THREE.Texture>>({});
   const trayScaleRef = useRef(0.5);
   const requestRef = useRef<number>(0);
 
   // --- Game Logic ---
+
+  // Pre-load all theme textures on mount or theme change
+  useEffect(() => {
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    theme.items.forEach(type => {
+      if (type.texture && !texturesRef.current[type.id]) {
+        texturesRef.current[type.id] = loader.load(type.texture, (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          setLoadedTextures(prev => ({ ...prev, [type.id]: true }));
+        });
+      }
+    });
+  }, [theme]);
 
   const initScene = useCallback(() => {
     if (!containerRef.current) return () => {};
 
     // --- Physics Setup ---
     const world = new CANNON.World();
-    world.gravity.set(0, -45, 0); // Further increased gravity for faster collapse
+    world.gravity.set(0, -25, 0); // Lighter gravity for better stacking
     world.allowSleep = true;
     worldRef.current = world;
 
@@ -108,7 +237,7 @@ export default function App() {
     
     const groundItemContact = new CANNON.ContactMaterial(groundMaterial, itemMaterial, {
       friction: 0.5,
-      restitution: 0.2,
+      restitution: 0.3, // Slight bounce
       contactEquationStiffness: 1e7,
       contactEquationRelaxation: 3,
     });
@@ -116,7 +245,7 @@ export default function App() {
 
     const itemItemContact = new CANNON.ContactMaterial(itemMaterial, itemMaterial, {
       friction: 0.4,
-      restitution: 0.1,
+      restitution: 0.3, // Slight bounce
       contactEquationStiffness: 1e7,
       contactEquationRelaxation: 3,
     });
@@ -133,8 +262,10 @@ export default function App() {
 
     // --- Three.js Setup ---
     const scene = new THREE.Scene();
-    // Remove solid background to allow transparency
     sceneRef.current = scene;
+
+    const overlayScene = new THREE.Scene();
+    overlaySceneRef.current = overlayScene;
 
     const camera = new THREE.PerspectiveCamera(
       45,
@@ -143,9 +274,20 @@ export default function App() {
       1000
     );
     
+    const overlayCamera = new THREE.PerspectiveCamera(
+      45,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    overlayCamera.position.set(0, 0, 0); // Camera at origin for simpler overlay math
+    overlayCamera.lookAt(0, 0, -1);
+    overlayCameraRef.current = overlayCamera;
+    
     const updateCamera = () => {
       const aspect = window.innerWidth / window.innerHeight;
       camera.aspect = aspect;
+      overlayCamera.aspect = aspect;
       
       // Unified camera distance for both PC and mobile to ensure same stacking space feel
       if (aspect < 0.6) {
@@ -157,17 +299,24 @@ export default function App() {
       }
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
+      overlayCamera.updateProjectionMatrix();
     };
     
     updateCamera();
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: !isMobile, alpha: true });
     renderer.setClearColor(0x000000, 0); // Transparent background
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    containerRef.current.appendChild(renderer.domElement);
+    renderer.shadowMap.enabled = !isMobile;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1.2) : Math.min(window.devicePixelRatio, 2));
+    
+    // Clear container to prevent duplicate canvases in Strict Mode (Fixes double grid issue)
+    if (containerRef.current) {
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(renderer.domElement);
+    }
     rendererRef.current = renderer;
     
     // Ensure canvas is layered correctly
@@ -178,20 +327,30 @@ export default function App() {
     renderer.domElement.style.pointerEvents = 'auto';
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(10, 20, 10);
-    dirLight.castShadow = true;
+    dirLight.castShadow = !isMobile;
     scene.add(dirLight);
 
-    const pointLight = new THREE.PointLight(0xffffff, 1.5);
+    const pointLight = new THREE.PointLight(0xffffff, 2.5);
     pointLight.position.set(0, 10, 0);
     scene.add(pointLight);
 
+    // Overlay Lights - Ensure items in tray are well-lit
+    const overlayAmbient = new THREE.AmbientLight(0xffffff, 1.5);
+    overlayScene.add(overlayAmbient);
+    const overlayPoint = new THREE.PointLight(0xffffff, 2.0);
+    overlayPoint.position.set(0, 10, 20);
+    overlayScene.add(overlayPoint);
+
     // Floor - Only grid for better transparency
-    const grid = new THREE.GridHelper(50, 50, 0x334155, 0x334155);
+    // Reduced size from 50 to 22 to prevent covering the UI Tray at the bottom
+    const grid = new THREE.GridHelper(22, 22, 0x94a3b8, 0x94a3b8);
+    (grid.material as THREE.Material).opacity = 0.5;
+    (grid.material as THREE.Material).transparent = true;
     grid.position.y = 0.01;
     scene.add(grid);
 
@@ -238,102 +397,115 @@ export default function App() {
     const animate = () => {
       requestRef.current = requestAnimationFrame(animate);
       
-      // Step physics with more sub-steps for better collision accuracy and to reduce overlapping
-      world.step(1 / 60, 1 / 60, 20);
-
       const camera = cameraRef.current;
       if (!camera) return;
 
-      // Update camera based on rotation
-      const radius = 35;
-      const angle = rotationRef.current;
-      camera.position.x = Math.sin(angle) * radius;
-      camera.position.z = Math.cos(angle) * radius;
-      camera.lookAt(0, 5, 0);
+      // Only run physics and game logic if not paused
+      if (!isPausedRef.current) {
+        // Step physics with more sub-steps for better collision accuracy and to reduce overlapping
+        world.step(1 / 60, 1 / 60, isMobile ? 5 : 10);
 
-      // Handle item movement
-      const currentItems = itemsRef.current || [];
-      const currentTray = trayRef.current || [];
-      
-      // Update items in pile from physics
-      currentItems.forEach(item => {
-        if (item.body && !item.isMoving) {
-          item.mesh.position.copy(item.body.position as unknown as THREE.Vector3);
-          item.mesh.quaternion.copy(item.body.quaternion as unknown as THREE.Quaternion);
-        }
-      });
+        // Update camera based on rotation
+        const radius = 35;
+        const angle = rotationRef.current;
+        camera.position.x = Math.sin(angle) * radius;
+        camera.position.z = Math.cos(angle) * radius;
+        camera.lookAt(0, 5, 0);
+        camera.updateMatrixWorld(); // Ensure world matrix is fresh for any coordinate conversions
 
-      // Update tray item positions dynamically to follow camera perfectly
-      if (uiTrayRef.current) {
-        // Retry capturing NDC if it's not yet captured or layout might have changed
-        if (!trayCapturedRef.current) {
-          if (updateTrayNDC()) {
-            trayCapturedRef.current = true;
+        // Handle item movement
+        const currentItems = itemsRef.current || [];
+        const currentTray = trayRef.current || [];
+        
+        // Update items in pile from physics
+        currentItems.forEach(item => {
+          if (item.body && !item.isMoving) {
+            item.mesh.position.copy(item.body.position as unknown as THREE.Vector3);
+            item.mesh.quaternion.copy(item.body.quaternion as unknown as THREE.Quaternion);
           }
-        }
+        });
 
-        const camera = cameraRef.current;
-        if (!camera) return;
-        
-        camera.getWorldDirection(cameraDir);
-        const planeNormal = cameraDir.clone().negate();
-        
-        // Slightly further distance for better perspective fit
-        const trayDistance = 22; 
-        const planePoint = camera.position.clone().add(cameraDir.clone().multiplyScalar(trayDistance));
-        trayPlane.setFromNormalAndCoplanarPoint(planeNormal, planePoint);
-
-        const { left, right, centerY } = trayNDCRef.current;
-        
-        const getWorldPos = (ndcX: number) => {
-          mouseVector.set(ndcX, centerY);
-          raycaster.setFromCamera(mouseVector, camera);
-          const result = raycaster.ray.intersectPlane(trayPlane, intersectPoint);
-          return result ? intersectPoint.clone() : new THREE.Vector3(0, -100, 0);
-        };
-
-        // Calculate slot positions more directly
-        const getSlotPos = (index: number) => {
-          const ndcX = left + (index + 0.5) * (right - left) / TRAY_SIZE;
-          return getWorldPos(ndcX);
-        };
-
-        const leftWorld = getWorldPos(left);
-        const rightWorld = getWorldPos(right);
-        const trayWidth = new THREE.Vector3().subVectors(rightWorld, leftWorld).length();
-        const slotWidth = trayWidth / TRAY_SIZE;
-
-        // Scale items to fit comfortably in slots
-        // Increased scale for better visibility
-        const targetScale = (slotWidth * 0.85) / 2.25;
-        trayScaleRef.current = Math.max(0.15, Math.min(0.6, targetScale));
-        const currentTrayScale = trayScaleRef.current;
-
-        currentTray.forEach((item, index) => {
-          const targetPos = getSlotPos(index);
+        // Update tray item positions dynamically to follow camera perfectly
+        if (uiTrayRef.current && overlayCameraRef.current && overlaySceneRef.current) {
+          const oCamera = overlayCameraRef.current;
           
-          item.targetPos = targetPos;
-          item.mesh.quaternion.copy(camera.quaternion);
+          // Retry capturing NDC if it's not yet captured or layout might have changed
+          if (!trayCapturedRef.current) {
+            if (updateTrayNDC()) {
+              trayCapturedRef.current = true;
+            }
+          }
 
-          // Always lerp position and scale for smooth movement, even when not "transitioning"
-          // This handles index changes (grouping) smoothly
-          const lerpFactor = item.isTransitioning ? 0.2 : 0.15;
-          item.mesh.position.lerp(targetPos, lerpFactor);
+          const { left, right, centerY } = trayNDCRef.current;
+          const trayDistance = 30; 
           
-          const s = item.mesh.scale.x;
-          const nextS = THREE.MathUtils.lerp(s, currentTrayScale, 0.15);
-          item.mesh.scale.set(nextS, nextS, nextS);
+          // Calculate camera-space half-dimensions at tray distance
+          const halfH = Math.abs(trayDistance) * Math.tan(THREE.MathUtils.degToRad(oCamera.fov / 2));
+          const halfW = halfH * oCamera.aspect;
 
-          if (item.isTransitioning) {
-            if (item.mesh.position.distanceTo(targetPos) < 0.02) {
+          const getSlotPosOverlay = (index: number) => {
+            const ndcX = left + (index + 0.5) * (right - left) / TRAY_SIZE;
+            return new THREE.Vector3(ndcX * halfW, centerY * halfH, -trayDistance);
+          };
+
+          // Scale items to fit comfortably in slots
+          const trayWidthOverlay = (right - left) * halfW;
+          const slotWidthOverlay = trayWidthOverlay / TRAY_SIZE;
+          const targetScale = (slotWidthOverlay * 0.85) / 2.25;
+          trayScaleRef.current = Math.max(0.1, Math.min(0.5, targetScale));
+          const currentTrayScale = trayScaleRef.current;
+
+          currentTray.forEach((item, index) => {
+            const targetPos = getSlotPosOverlay(index);
+            item.targetPos = targetPos;
+            
+            // Ensure item is in overlay scene
+            if (item.mesh.parent !== overlaySceneRef.current) {
+              if (item.mesh.parent) item.mesh.parent.remove(item.mesh);
+              overlaySceneRef.current?.add(item.mesh);
+            }
+
+            // In overlay space, identity rotation means facing the camera
+            item.mesh.quaternion.set(0, 0, 0, 1);
+
+            // Always lerp if not at targetPos to handle shifting smoothly
+            const dist = item.mesh.position.distanceTo(targetPos);
+            if (dist > 0.01) {
+              item.mesh.position.lerp(targetPos, 0.2);
+              
+              const s = item.mesh.scale.x;
+              const nextS = THREE.MathUtils.lerp(s, currentTrayScale, 0.15);
+              item.mesh.scale.set(nextS, nextS, nextS);
+            } else {
+              item.mesh.position.copy(targetPos);
+              item.mesh.scale.set(currentTrayScale, currentTrayScale, currentTrayScale);
               item.isTransitioning = false;
               item.isMoving = false;
             }
-          }
-        });
+          });
+
+          // Garbage collect overlay scene to remove items that were eliminated
+          overlaySceneRef.current.children.forEach(child => {
+            if (child.userData.isGameItem) {
+              const isInTray = currentTray.some(item => item.mesh === child);
+              if (!isInTray) {
+                overlaySceneRef.current?.remove(child);
+              }
+            }
+          });
+        }
       }
 
+      // Render main scene
       renderer.render(scene, camera);
+      
+      // Render Overlay
+      if (overlaySceneRef.current && overlayCameraRef.current) {
+        renderer.autoClear = false;
+        renderer.clearDepth();
+        renderer.render(overlaySceneRef.current, overlayCameraRef.current);
+        renderer.autoClear = true;
+      }
     };
     animate();
 
@@ -356,91 +528,72 @@ export default function App() {
   const clearAllItems = useCallback(() => {
     // Clear pile items
     itemsRef.current.forEach(item => {
-      sceneRef.current?.remove(item.mesh);
+      if (item.mesh.parent) item.mesh.parent.remove(item.mesh);
       if (item.body) worldRef.current?.removeBody(item.body);
     });
     itemsRef.current = [];
 
     // Clear tray items
     trayRef.current.forEach(item => {
-      sceneRef.current?.remove(item.mesh);
+      if (item.mesh.parent) item.mesh.parent.remove(item.mesh);
       if (item.body) worldRef.current?.removeBody(item.body);
     });
     setTray([]);
+    trayRef.current = [];
   }, []);
 
-  const spawnItems = useCallback((typeCount: number, triplesPerType: number) => {
+  const spawnItems = useCallback((typeCount: number, triplesPerType: number, currentTheme: typeof THEMES['fruit']) => {
     if (!sceneRef.current || !worldRef.current) return;
 
     // Clear existing
     clearAllItems();
 
     const newItems: GameItem[] = [];
-    const typesToUse = [...ITEM_TYPES].sort(() => Math.random() - 0.5).slice(0, typeCount);
+    const typesToUse = [...currentTheme.items].sort(() => Math.random() - 0.5).slice(0, typeCount);
     const totalCount = typeCount * triplesPerType * 3;
 
     for (let i = 0; i < totalCount; i++) {
       const type = typesToUse[i % typeCount];
-      const material = new THREE.MeshStandardMaterial({ 
-        color: type.color,
-        roughness: 0.3,
-        metalness: 0.2
-      });
-      const mesh = new THREE.Mesh(type.geometry, material);
+      const geometry = type.createGeometry();
       
-      // Add outline to the mesh
-      const threshold = (type.id === 'sphere' || type.id === 'cylinder' || type.id === 'cone' || type.id === 'torus' || type.id === 'knot') ? 60 : 20;
-      const edges = new THREE.EdgesGeometry(type.geometry, threshold);
-      const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+      const material = new THREE.MeshStandardMaterial({ 
+        map: texturesRef.current[type.id] || null,
+        color: loadedTextures[type.id] ? 0xffffff : type.color, 
+        roughness: 0.5,
+        metalness: 0.0,
+        emissive: loadedTextures[type.id] ? 0x222222 : new THREE.Color(type.color).multiplyScalar(0.2),
+        emissiveIntensity: 0.5
+      });
+      
+      // Improve texture mapping
+      if (texturesRef.current[type.id]) {
+        texturesRef.current[type.id].wrapS = THREE.RepeatWrapping;
+        texturesRef.current[type.id].wrapT = THREE.RepeatWrapping;
+        texturesRef.current[type.id].repeat.set(1, 1);
+      }
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.isGameItem = true;
+
+      // Add bright outline for better visibility
+      const edges = new THREE.EdgesGeometry(geometry);
+      const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 });
       const outline = new THREE.LineSegments(edges, lineMaterial);
-      outline.raycast = () => {}; // Make outline invisible to raycaster
       mesh.add(outline);
       
-      // Physics Body
-      let shape: CANNON.Shape;
-      switch (type.id) {
-        case 'cube':
-          shape = new CANNON.Box(new CANNON.Vec3(1.125, 1.125, 1.125));
-          break;
-        case 'sphere':
-          shape = new CANNON.Sphere(1.5);
-          break;
-        case 'cylinder':
-          shape = new CANNON.Cylinder(1.2, 1.2, 2.25, 32);
-          break;
-        case 'cone':
-          // Top radius 0.01, bottom 1.5, height 2.7
-          shape = new CANNON.Cylinder(0.01, 1.5, 2.7, 32);
-          break;
-        case 'capsule':
-          // Capsule is radius 1.05, height 1.2 (total height 3.3)
-          shape = new CANNON.Cylinder(1.05, 1.05, 3.3, 16);
-          break;
-        case 'octahedron':
-        case 'icosahedron':
-        case 'dodecahedron':
-          shape = new CANNON.Sphere(1.8);
-          break;
-        case 'torus':
-        case 'knot':
-          shape = new CANNON.Sphere(1.5);
-          break;
-        default:
-          shape = new CANNON.Sphere(1.5);
-      }
+      // Physics Body (Modular)
+      const shape = type.createShape();
 
       const body = new CANNON.Body({
         mass: 1,
         material: itemMaterialRef.current || undefined,
-        angularDamping: 0.15, // Reduced damping for more natural movement
-        linearDamping: 0.1,
+        angularDamping: 0.5,
+        linearDamping: 0.5,
       });
 
-      // Adjust orientation for cylinders/cones (Cannon is Z-aligned, Three is Y-aligned)
-      if (type.id === 'cylinder' || type.id === 'capsule' || type.id === 'cone') {
-        const q = new CANNON.Quaternion();
-        q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-        body.addShape(shape, new CANNON.Vec3(), q);
+      // Use item-specific rotation offset if defined (e.g. for cylinders)
+      if (type.rotationOffset) {
+        body.addShape(shape, new CANNON.Vec3(), type.rotationOffset);
       } else {
         body.addShape(shape);
       }
@@ -491,10 +644,11 @@ export default function App() {
 
     const config = LEVEL_CONFIGS[Math.min(level, LEVEL_CONFIGS.length - 1)];
     setGameState('playing');
+    setIsPaused(false);
     trayCapturedRef.current = false; // Reset capture flag for new game
     setTimeLeft(config.time);
     setScore(0);
-    spawnItems(config.types, config.triplesPerType);
+    spawnItems(config.types, config.triplesPerType, THEMES[currentThemeId]);
   };
 
   const handlePointerDown = (event: React.PointerEvent) => {
@@ -504,7 +658,7 @@ export default function App() {
     }
     event.stopPropagation();
     
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' || isPaused) return;
     
     setIsDragging(false);
     setLastMouseX(event.clientX);
@@ -537,47 +691,98 @@ export default function App() {
   };
 
   const handlePointerMove = (event: React.PointerEvent) => {
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' || isPaused) return;
 
     if (event.buttons === 1) {
       const deltaX = event.clientX - lastMouseX;
       if (Math.abs(deltaX) > 5) {
         setIsDragging(true);
       }
-      setRotation(prev => prev - deltaX * 0.01);
+      const rotationSpeed = isMobile ? 0.004 : 0.006;
+      setRotation(prev => prev - deltaX * rotationSpeed);
       setLastMouseX(event.clientX);
     }
   };
 
-  const handlePointerUp = (event: React.PointerEvent) => {
-    if (gameState !== 'playing') return;
-    
-    const clickedItem = clickedItemRef.current;
-    if (clickedItem && !isDragging) {
-      const item = clickedItem;
+    const handlePointerUp = (event: React.PointerEvent) => {
+      if (gameState !== 'playing' || isPaused) return;
       
-      // Prevent clicking the same item twice or clicking when tray is full
-      if (item.isMoving || trayRef.current.length >= TRAY_SIZE) return;
-
-      // Mark as moving immediately to prevent double-clicks
-      item.isMoving = true;
-      item.isTransitioning = true;
-      item.mesh.rotation.set(0, 0, 0);
-      
-      // Ensure tray items are always visible on top
-      if (item.mesh.material) {
-        const materials = Array.isArray(item.mesh.material) ? item.mesh.material : [item.mesh.material];
-        materials.forEach(m => {
-          m.depthTest = false;
-          m.transparent = true;
-          m.depthWrite = false; // Further ensure no depth issues
+      const clickedItem = clickedItemRef.current;
+      if (clickedItem && !isDragging) {
+        const item = clickedItem;
+        
+        // 1. Flush existing matches synchronously before adding new item
+        // This implements "eliminate before placing" to prevent unfair game overs
+        const typeCounts: Record<string, number> = {};
+        trayRef.current.forEach(i => {
+          typeCounts[i.typeId] = (typeCounts[i.typeId] || 0) + 1;
         });
-      }
-      // Render order based on index will be updated in setTray
-      item.mesh.renderOrder = 999;
+        const matchedTypeId = Object.keys(typeCounts).find(tid => typeCounts[tid] >= 3);
+        
+        if (matchedTypeId) {
+          const matchedItems = trayRef.current.filter(i => i.typeId === matchedTypeId).slice(0, 3);
+          const remainingTray = trayRef.current.filter(i => !matchedItems.includes(i));
+          
+          // Remove matched from scene immediately
+          matchedItems.forEach(i => {
+            if (i.mesh.parent) i.mesh.parent.remove(i.mesh);
+            if (i.body) worldRef.current?.removeBody(i.body);
+          });
+          
+          setScore(s => s + 100);
+          setIsMatching(false);
+          setTray(remainingTray);
+          trayRef.current = remainingTray;
+        }
 
-      setTray(prevTray => {
-        if (prevTray.length >= TRAY_SIZE) return prevTray;
+        // 2. Prevent clicking when tray is full (9 items)
+        if (item.isMoving || trayRef.current.length > TRAY_SIZE) {
+          clickedItemRef.current = null;
+          setIsDragging(false);
+          return;
+        }
+
+        // Mark as moving immediately to prevent double-clicks
+        item.isMoving = true;
+        item.isTransitioning = true;
+        
+        // Seamless transition to overlay scene using NDC projection
+        if (cameraRef.current && overlayCameraRef.current && overlaySceneRef.current) {
+          const mainCamera = cameraRef.current;
+          const oCamera = overlayCameraRef.current;
+          
+          // 1. Capture current screen position (NDC)
+          item.mesh.updateMatrixWorld();
+          const worldPos = new THREE.Vector3();
+          item.mesh.getWorldPosition(worldPos);
+          worldPos.project(mainCamera); // Convert to NDC (-1 to 1)
+          
+          // 2. Move to overlay scene
+          sceneRef.current?.remove(item.mesh);
+          overlaySceneRef.current.add(item.mesh);
+          
+          // 3. Unproject NDC to overlay scene space at a fixed distance
+          const trayDistance = 30;
+          const halfH = Math.abs(trayDistance) * Math.tan(THREE.MathUtils.degToRad(oCamera.fov / 2));
+          const halfW = halfH * oCamera.aspect;
+          
+          item.mesh.position.set(worldPos.x * halfW, worldPos.y * halfH, -trayDistance);
+          item.mesh.quaternion.set(0, 0, 0, 1); // Face camera in UI space
+        }
+
+        item.mesh.rotation.set(0, 0, 0);
+        
+        // Ensure tray items are always visible and correctly sorted in overlay
+        if (item.mesh.material) {
+          const materials = Array.isArray(item.mesh.material) ? item.mesh.material : [item.mesh.material];
+          materials.forEach(m => {
+            m.depthTest = true;
+            m.transparent = true;
+            m.depthWrite = true; 
+          });
+        }
+        // Render order based on index will be updated in setTray
+        item.mesh.renderOrder = 999;
 
         // Remove from physics world
         if (item.body && worldRef.current) {
@@ -585,40 +790,41 @@ export default function App() {
           item.body = undefined;
         }
 
-        // Calculate insertion index to group same types
-        const sameTypeIndex = prevTray.findLastIndex(i => i.typeId === item.typeId);
-        const insertIndex = sameTypeIndex !== -1 ? sameTypeIndex + 1 : prevTray.length;
-        
-        const newTray = [...prevTray];
-        newTray.splice(insertIndex, 0, item);
-        
-        // Update render order to ensure correct overlapping in tray
-        newTray.forEach((item, idx) => {
-          item.mesh.renderOrder = 1000 + idx;
+        setTray(prevTray => {
+          // Calculate insertion index to group same types
+          const sameTypeIndex = prevTray.findLastIndex(i => i.typeId === item.typeId);
+          const insertIndex = sameTypeIndex !== -1 ? sameTypeIndex + 1 : prevTray.length;
+          
+          const newTray = [...prevTray];
+          newTray.splice(insertIndex, 0, item);
+          
+          // Update render order to ensure correct overlapping in tray
+          newTray.forEach((item, idx) => {
+            item.mesh.renderOrder = 1000 + idx;
+          });
+
+          // Sync ref immediately
+          trayRef.current = newTray;
+          
+          // Remove from main items list
+          const itemIndex = itemsRef.current.indexOf(item);
+          if (itemIndex !== -1) {
+            itemsRef.current.splice(itemIndex, 1);
+          }
+
+          // Wake up neighbors
+          itemsRef.current.forEach(i => {
+            if (i.body) i.body.wakeUp();
+          });
+
+          return newTray;
         });
-
-        // Sync ref immediately
-        trayRef.current = newTray;
-        
-        // Remove from main items list
-        const itemIndex = itemsRef.current.indexOf(item);
-        if (itemIndex !== -1) {
-          itemsRef.current.splice(itemIndex, 1);
-        }
-
-        // Wake up neighbors
-        itemsRef.current.forEach(i => {
-          if (i.body) i.body.wakeUp();
-        });
-
-        return newTray;
-      });
-    }
-    
-    // Clear the stored item
-    clickedItemRef.current = null;
-    setIsDragging(false);
-  };
+      }
+      
+      // Clear the stored item
+      clickedItemRef.current = null;
+      setIsDragging(false);
+    };
 
   // Update tray NDC coordinates on resize
   const updateTrayNDC = useCallback(() => {
@@ -672,9 +878,23 @@ export default function App() {
     };
   }, [updateTrayNDC, gameState]);
 
+  // Handle Game Over sequence separately to ensure it completes
+  useEffect(() => {
+    if (isLosing) {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+      const timer = setTimeout(() => {
+        setGameState('lost');
+        setIsLosing(false);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isLosing]);
+
   // Check for matches in tray
   useEffect(() => {
-    if (tray.length === 0) return;
+    if (gameState !== 'playing' || tray.length === 0) return;
 
     const typeCounts: Record<string, number> = {};
     tray.forEach(item => {
@@ -683,19 +903,24 @@ export default function App() {
 
     const matchedTypeId = Object.keys(typeCounts).find(typeId => typeCounts[typeId] >= 3);
 
-    if (matchedTypeId) {
+    if (tray.length > TRAY_SIZE) {
+      setIsLosing(true);
+    } else if (matchedTypeId) {
       setIsMatching(true);
       const timer = setTimeout(() => {
         const matchedItems = tray.filter(item => item.typeId === matchedTypeId).slice(0, 3);
         const remainingTray = tray.filter(item => !matchedItems.includes(item));
         
-        // Remove matched from scene
+        // Update ref immediately to prevent animate loop from re-adding
+        trayRef.current = remainingTray;
+        setTray(remainingTray);
+        
+        // Remove matched from scene/camera
         matchedItems.forEach(item => {
-          sceneRef.current?.remove(item.mesh);
+          if (item.mesh.parent) item.mesh.parent.remove(item.mesh);
           if (item.body) worldRef.current?.removeBody(item.body);
         });
         
-        setTray(remainingTray);
         setScore(s => s + 100);
         setIsMatching(false);
 
@@ -717,20 +942,18 @@ export default function App() {
         }
       }, 300);
       return () => clearTimeout(timer);
-    } else if (tray.length >= TRAY_SIZE) {
-      setGameState('lost');
     }
   }, [tray]);
 
   // Timer
   useEffect(() => {
-    if (gameState !== 'playing' || timeLeft <= 0 || !isPageVisible) {
+    if (gameState !== 'playing' || timeLeft <= 0 || !isPageVisible || isPaused) {
       if (timeLeft === 0 && gameState === 'playing') setGameState('lost');
       return;
     }
     const timer = setInterval(() => setTimeLeft(t => t - 1), 1000);
     return () => clearInterval(timer);
-  }, [gameState, timeLeft, isPageVisible]);
+  }, [gameState, timeLeft, isPageVisible, isPaused]);
 
   // Orientation Check
   useEffect(() => {
@@ -834,12 +1057,23 @@ export default function App() {
           className={`absolute ${isMobile ? 'bottom-24' : 'bottom-4'} left-1/2 -translate-x-1/2 w-[90%] max-w-[500px] pointer-events-none z-[1]`}
         >
           <motion.div 
-            animate={isMatching ? { x: [0, -5, 5, -5, 5, 0], scale: [1, 1.02, 1] } : {}}
-            className="w-full h-20 bg-indigo-950/80 backdrop-blur-xl rounded-2xl border-4 border-indigo-500/40 flex items-center justify-between gap-1 p-2 relative shadow-2xl"
+            animate={(isMatching || isLosing) ? { 
+              x: isLosing ? [-15, 15, -15, 15, -15, 15, 0] : [0, -5, 5, -5, 5, 0], 
+              y: isLosing ? [-5, 5, -5, 5, 0] : 0,
+              scale: isLosing ? [1, 1.1, 0.9, 1.1, 1] : [1, 1.02, 1],
+              rotate: isLosing ? [-5, 5, -5, 5, 0] : 0
+            } : {}}
+            transition={{ duration: isLosing ? 0.4 : 0.3, repeat: isLosing ? Infinity : 0 }}
+            className="w-full h-20 bg-indigo-900/80 backdrop-blur-xl rounded-2xl border-4 border-indigo-400/50 flex items-center justify-between gap-1 p-2 relative shadow-2xl"
           >
+            {isLosing && (
+              <div className="absolute -top-12 left-1/2 -translate-x-1/2 whitespace-nowrap text-red-500 font-black text-2xl italic tracking-tighter animate-bounce drop-shadow-lg">
+                TRAY FULL! GAME OVER
+              </div>
+            )}
             {/* Visual Slots */}
             {Array.from({ length: TRAY_SIZE }).map((_, i) => (
-              <div key={i} className="flex-1 h-full rounded-lg border border-white/10 bg-black/40 shadow-inner" />
+              <div key={i} className="flex-1 h-full rounded-lg border border-white/30 bg-white/10 shadow-inner" />
             ))}
           </motion.div>
         </div>
@@ -856,46 +1090,144 @@ export default function App() {
 
       {/* 3. HUD Layer (Top Layer) */}
       {gameState === 'playing' && (
-        <div className={`absolute ${isMobile ? 'top-12' : 'top-0'} left-0 w-full p-2 flex justify-between items-start pointer-events-none z-30`}>
+        <div className={`absolute ${isMobile ? 'top-12' : 'top-0'} left-0 w-full p-1.5 flex justify-between items-start pointer-events-none z-30`}>
             <motion.div 
               animate={isMatching ? { scale: [1, 1.2, 1], rotate: [0, 5, -5, 0] } : {}}
               transition={{ delay: 1.2, duration: 0.4 }}
-              className="bg-white/80 backdrop-blur-md p-2 rounded-xl shadow-lg border border-white/20 flex items-center gap-3"
+              className={`bg-white/80 backdrop-blur-md ${isMobile ? 'p-1.5 gap-2' : 'p-2 gap-3'} rounded-xl shadow-lg border border-white/20 flex items-center`}
             >
-            <div className="flex items-center gap-2 text-slate-700 font-bold">
-              <Trophy className="w-5 h-5 text-yellow-500" />
-              <span>{score}</span>
+            <div className={`flex items-center ${isMobile ? 'gap-1' : 'gap-2'} text-slate-700 font-bold`}>
+              <Trophy className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} text-yellow-500`} />
+              <span className={isMobile ? 'text-xs' : ''}>{score}</span>
             </div>
-            <div className={`flex items-center gap-2 font-bold ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-slate-700'}`}>
-              <Timer className="w-5 h-5" />
-              <span>{timeLeft}s</span>
+            <div className={`flex items-center ${isMobile ? 'gap-1' : 'gap-2'} font-bold border-l border-slate-200 ${isMobile ? 'pl-2' : 'pl-3'} ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-slate-700'}`}>
+              <Timer className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
+              <span className={isMobile ? 'text-xs' : ''}>{timeLeft}s</span>
+            </div>
+            <div className={`flex items-center ${isMobile ? 'gap-1' : 'gap-2'} text-indigo-600 font-bold border-l border-slate-200 ${isMobile ? 'pl-2' : 'pl-3'}`}>
+              <Box className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
+              <span className={isMobile ? 'text-xs' : ''}>{itemsRef.current.length + tray.length}</span>
             </div>
           </motion.div>
           
-          <div className="flex items-center gap-2">
+          <div className={`flex items-center ${isMobile ? 'gap-1' : 'gap-2'}`}>
             <button 
-              onClick={startGame}
-              className="bg-orange-500 hover:bg-orange-600 text-white p-2 rounded-xl shadow-lg border border-orange-400 pointer-events-auto transition-colors flex items-center gap-1"
+              onClick={() => setIsPaused(true)}
+              className={`bg-white/80 backdrop-blur-md hover:bg-white text-slate-700 ${isMobile ? 'p-2' : 'p-2.5'} rounded-xl shadow-lg border border-white/20 pointer-events-auto transition-colors flex items-center justify-center`}
+              title="Pause Game"
+            >
+              <Pause className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
+            </button>
+            <button 
+              onClick={() => setShowRestartConfirm(true)}
+              className={`bg-orange-500 hover:bg-orange-600 text-white ${isMobile ? 'p-2' : 'p-2.5'} rounded-xl shadow-lg border border-orange-400 pointer-events-auto transition-colors flex items-center justify-center`}
               title="Restart Level"
             >
-              <RotateCcw className="w-4 h-4" />
-              <span className="text-[10px] font-bold">RESTART</span>
+              <RotateCcw className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
             </button>
-            <div className="bg-white/80 backdrop-blur-md p-2 rounded-xl shadow-lg border border-white/20">
-              <span className="text-slate-500 text-[10px] uppercase tracking-widest font-bold">Level {level + 1}</span>
+            <div className={`bg-white/80 backdrop-blur-md ${isMobile ? 'p-1.5' : 'p-2'} rounded-xl shadow-lg border border-white/20`}>
+              <span className={`text-slate-500 ${isMobile ? 'text-[9px]' : 'text-[10px]'} uppercase tracking-widest font-bold`}># {level + 1}</span>
             </div>
-            <button 
-              onClick={toggleFullscreen}
-              className="bg-white/80 backdrop-blur-md p-2 rounded-xl shadow-lg border border-white/20 pointer-events-auto hover:bg-white transition-colors"
-              title="Toggle Fullscreen"
-            >
-              {isFullscreen ? <Minimize className="w-4 h-4 text-slate-600" /> : <Maximize className="w-4 h-4 text-slate-600" />}
-            </button>
+            {!isMobile && (
+              <button 
+                onClick={toggleFullscreen}
+                className="bg-white/80 backdrop-blur-md p-2 rounded-xl shadow-lg border border-white/20 pointer-events-auto hover:bg-white transition-colors"
+                title="Toggle Fullscreen"
+              >
+                {isFullscreen ? <Minimize className="w-4 h-4 text-slate-600" /> : <Maximize className="w-4 h-4 text-slate-600" />}
+              </button>
+            )}
           </div>
         </div>
       )}
 
       <AnimatePresence>
+        {showRestartConfirm && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white rounded-3xl p-8 shadow-2xl max-w-xs w-full text-center"
+            >
+              <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <RotateCcw className="w-8 h-8 text-orange-600" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">重新開始？</h3>
+              <p className="text-slate-500 mb-6">目前的進度將會遺失。</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowRestartConfirm(false)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3 rounded-xl transition-colors"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowRestartConfirm(false);
+                    startGame();
+                  }}
+                  className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-orange-200 transition-colors"
+                >
+                  確定
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+        {isPaused && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white rounded-3xl p-8 shadow-2xl max-w-xs w-full text-center"
+            >
+              <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Pause className="w-8 h-8 text-indigo-600" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-6">遊戲暫停</h3>
+              
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => setIsPaused(false)}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  繼續遊戲
+                </button>
+                <button 
+                  onClick={() => {
+                    setIsPaused(false);
+                    startGame();
+                  }}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  <RotateCcw className="w-5 h-5" />
+                  重新開始
+                </button>
+                <button 
+                  onClick={() => {
+                    setIsPaused(false);
+                    setGameState('start');
+                  }}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  <Home className="w-5 h-5" />
+                  回到主選單
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
         {isLandscape && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -921,18 +1253,35 @@ export default function App() {
               animate={{ scale: 1, y: 0 }}
               className="bg-white rounded-[2.5rem] p-10 shadow-2xl max-w-sm w-full border border-slate-100"
             >
+              {/* Theme Selector */}
+              <div className="absolute top-6 right-6">
+                <button 
+                  onClick={() => {
+                    const keys = Object.keys(THEMES);
+                    const currentIndex = keys.indexOf(currentThemeId);
+                    const nextIndex = (currentIndex + 1) % keys.length;
+                    setCurrentThemeId(keys[nextIndex]);
+                  }}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors flex items-center gap-2 px-3"
+                  title="Change Theme"
+                >
+                  <span className="text-xs font-bold uppercase">{theme.name}</span>
+                  <Palette className="w-5 h-5" />
+                </button>
+              </div>
+
               <div className="w-20 h-20 bg-indigo-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
                 <Box className="w-10 h-10 text-indigo-600" />
               </div>
-              <h1 className="text-4xl font-black text-slate-900 mb-2 tracking-tight">Triple Stack</h1>
-              <p className="text-slate-500 mb-8 leading-relaxed">Match 3 identical items to clear the board. Don't let your tray fill up!</p>
+              <h1 className="text-4xl font-black text-slate-900 mb-2 tracking-tight">3D 配對消除</h1>
+              <p className="text-slate-500 mb-8 leading-relaxed">配對 3 個相同的水果來消除它們。別讓下方的托盤滿了！</p>
               
               <button 
                 onClick={startGame}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center justify-center gap-2 text-lg"
               >
                 <Play className="w-6 h-6 fill-current" />
-                Play Now
+                立即開始
               </button>
             </motion.div>
           </motion.div>
@@ -954,20 +1303,20 @@ export default function App() {
                   <div className="w-20 h-20 bg-yellow-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
                     <Trophy className="w-10 h-10 text-yellow-600" />
                   </div>
-                  <h2 className="text-3xl font-black text-slate-900 mb-2">Level Complete!</h2>
-                  <p className="text-slate-500 mb-8">You've cleared all items with {timeLeft}s left!</p>
+                  <h2 className="text-3xl font-black text-slate-900 mb-2">闖關成功！</h2>
+                  <p className="text-slate-500 mb-8">你清空了所有物品，還剩餘 {timeLeft} 秒！</p>
                   <div className="flex flex-col gap-3">
                     <button 
                       onClick={() => { setLevel(l => l + 1); startGame(); }}
                       className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg transition-all active:scale-95"
                     >
-                      Next Level
+                      下一關
                     </button>
                     <button 
                       onClick={startGame}
                       className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-2xl transition-all active:scale-95"
                     >
-                      Replay
+                      重新開始
                     </button>
                   </div>
                 </>
@@ -976,16 +1325,16 @@ export default function App() {
                   <div className="w-20 h-20 bg-red-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
                     <AlertCircle className="w-10 h-10 text-red-600" />
                   </div>
-                  <h2 className="text-3xl font-black text-slate-900 mb-2">Game Over</h2>
+                  <h2 className="text-3xl font-black text-slate-900 mb-2">遊戲結束</h2>
                   <p className="text-slate-500 mb-8">
-                    {timeLeft === 0 ? "Time's up!" : "Your tray is full!"}
+                    {timeLeft === 0 ? "時間到！" : "托盤滿了！"}
                   </p>
                   <button 
                     onClick={startGame}
                     className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
                   >
                     <RotateCcw className="w-5 h-5" />
-                    Try Again
+                    再試一次
                   </button>
                 </>
               )}
