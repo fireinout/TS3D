@@ -226,7 +226,7 @@ export default function App() {
 
     // --- Physics Setup ---
     const world = new CANNON.World();
-    world.gravity.set(0, -25, 0); // Lighter gravity for better stacking
+    world.gravity.set(0, -60, 0); // Stronger gravity for heavier feel
     world.allowSleep = true;
     worldRef.current = world;
 
@@ -237,7 +237,7 @@ export default function App() {
     
     const groundItemContact = new CANNON.ContactMaterial(groundMaterial, itemMaterial, {
       friction: 0.5,
-      restitution: 0.3, // Slight bounce
+      restitution: 0.2, // Lower restitution for heavier, solid feel
       contactEquationStiffness: 1e7,
       contactEquationRelaxation: 3,
     });
@@ -583,12 +583,31 @@ export default function App() {
       
       // Physics Body (Modular)
       const shape = type.createShape();
+      
+      // [Physics Calculation] Estimate volume to determine mass and air resistance
+      let volume = 3; // Fallback
+      if (shape instanceof CANNON.Box) {
+        const { x, y, z } = shape.halfExtents;
+        volume = x * y * z * 8;
+      } else if (shape instanceof CANNON.Sphere) {
+        volume = (4 / 3) * Math.PI * Math.pow(shape.radius, 3);
+      } else if (shape instanceof CANNON.Cylinder) {
+        const s = shape as any;
+        const r = (s.radiusTop + s.radiusBottom) * 0.5;
+        volume = Math.PI * r * r * s.height;
+      }
+
+      // Volume affects physics:
+      // 1. Mass: Proportional to volume (Density constant)
+      // 2. Damping: Inverse to size (Smaller objects float more/have more air resistance relative to mass)
+      const damping = Math.max(0.05, Math.min(0.6, 1.2 / Math.sqrt(volume || 1)));
+      const mass = Math.max(0.5, volume * 0.6);
 
       const body = new CANNON.Body({
-        mass: 1,
+        mass: mass,
         material: itemMaterialRef.current || undefined,
-        angularDamping: 0.5,
-        linearDamping: 0.5,
+        angularDamping: damping * 0.5,
+        linearDamping: damping, // Simulates air resistance (smaller = slower terminal velocity)
       });
 
       // Use item-specific rotation offset if defined (e.g. for cylinders)
@@ -1010,7 +1029,7 @@ export default function App() {
       {/* Score Particles */}
       <AnimatePresence>
         {particleBursts.map(burst => (
-          <div key={burst.id} className="absolute inset-0 pointer-events-none z-[60]">
+          <div key={burst.id} className="absolute inset-0 pointer-events-none z-60">
             {Array.from({ length: 24 }).map((_, i) => {
               const size = 4 + Math.random() * 6;
               const color = ['#fbbf24', '#f59e0b', '#ffffff', '#fcd34d'][Math.floor(Math.random() * 4)];
@@ -1054,7 +1073,7 @@ export default function App() {
       {gameState === 'playing' && (
         <div 
           ref={uiTrayRef}
-          className={`absolute ${isMobile ? 'bottom-24' : 'bottom-4'} left-1/2 -translate-x-1/2 w-[90%] max-w-[500px] pointer-events-none z-[1]`}
+          className={`absolute ${isMobile ? 'bottom-24' : 'bottom-4'} left-1/2 -translate-x-1/2 w-[90%] max-w-125 pointer-events-none z-1`}
         >
           <motion.div 
             animate={(isMatching || isLosing) ? { 
@@ -1147,7 +1166,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+            className="absolute inset-0 z-100 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
@@ -1184,7 +1203,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+            className="absolute inset-0 z-100 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
@@ -1233,7 +1252,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-slate-900 text-white p-6 text-center"
+            className="absolute inset-0 z-100 flex flex-col items-center justify-center bg-slate-900 text-white p-6 text-center"
           >
             <RotateCcw className="w-16 h-16 mb-4 animate-spin-slow" />
             <h2 className="text-2xl font-bold mb-2">請旋轉裝置</h2>
